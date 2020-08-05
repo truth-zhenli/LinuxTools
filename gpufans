@@ -1,0 +1,77 @@
+#!/bin/bash
+
+# This script modified the one from https://gist.github.com/squadbox/e5b5f7bcd86259d627ed
+# It will enable or disable fixed gpu fan speed.
+# You may have to run this as root or with sudo if the current user is not authorized to start X sessions.
+#
+# Two steps to execute it:
+# Step 1: chmod +x gpufans
+# Step 2: gpufans [40-100, auto]
+
+init 3
+
+nvidia-xconfig -a --enable-all-gpus --cool-bits=28 --allow-empty-initial-configuration
+
+# Paths to the utilities we will need
+SMI='/usr/bin/nvidia-smi'
+SET='/usr/bin/nvidia-settings'
+
+# Determine major driver version
+VER=`awk '/NVIDIA/ {print $8}' /proc/driver/nvidia/version | cut -d . -f 1`
+
+# Drivers from 285.x.y on allow persistence mode setting
+if [ ${VER} -lt 285 ]
+then
+    echo "Error: Current driver version is ${VER}. Driver version must be greater than 285."; exit 1;
+fi
+
+# Read a numerical command line arg between 40 and 100
+if [ "$1" -eq "$1" ] 2>/dev/null && [ "0$1" -ge "40" ]  && [ "0$1" -le "100" ]
+then
+    $SMI -pm 1 # enable persistance mode
+    speed=$1   # set speed
+
+    echo "Setting fan to $speed%."
+
+    # how many GPU's are in the system?
+    NUMGPU="$(nvidia-smi -L | wc -l)"
+
+    # loop through each GPU and individually set fan speed
+    n=0
+    while [  $n -lt  $NUMGPU ];
+    do
+        # start an x session, and call nvidia-settings to enable fan control and set speed
+        xinit ${SET} -a [gpu:${n}]/GPUFanControlState=1 -a [fan:${n}]/GPUTargetFanSpeed=$speed --  :0 -once
+        let n=n+1
+    done
+
+    echo "Complete"
+
+elif [ "x$1" = "xauto" ]
+then
+    $SMI -pm 0 # disable persistance mode
+
+    echo "Enabling default auto fan control."
+
+    # how many GPU's are in the system?
+    NUMGPU="$(nvidia-smi -L | wc -l)"
+
+    # loop through each GPU and individually set fan speed
+    n=0
+    while [  $n -lt  $NUMGPU ];
+    do
+        # start an x session, and call nvidia-settings to enable fan control and set speed
+        xinit ${SET} -a [gpu:${n}]/GPUFanControlState=0 --  :0 -once
+        let n=n+1
+    done 
+
+    echo "Complete"
+
+else
+    echo "Error: Please pick a fan speed between 40 and 100, or stop."; exit 1;
+fi
+
+rm /etc/X11/xorg.conf
+init 5
+exit 0;
+
